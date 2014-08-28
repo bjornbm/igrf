@@ -24,30 +24,21 @@ data SphericalHarmonicModel a = SphericalHarmonicModel
                                                          -- These coefficients are stored in the order [(g_0_0, h_0_0), (g_1_0, h1_0_), 1_1, 2_0, 2_1, 2_2, 3_0, 3_1, 3_2, 3_3, ...]
                                                          -- There must be Triangle('modelDegree' + 1) coefficients.
                               }
+                              | SphericalHarmonicModels [SphericalHarmonicModel a]
   deriving (Functor)
 
 -- TODO: consider how to relax the reference radius error condition
 -- TODO: make SphericalHarmonicModel an instance of additive typeclass
 -- | Adds two compatible spherical harmonic models.
-combine :: (Num a, Eq a) => SphericalHarmonicModel a -> SphericalHarmonicModel a -> SphericalHarmonicModel a
-combine m1 m2 | (referenceRadius m1 /= referenceRadius m2) = error "Incompatible model reference radii."
-              | otherwise                                  = SphericalHarmonicModel
-                                                           {
-                                                             modelDegree = max (modelDegree m1) (modelDegree m2)
-                                                           , referenceRadius = referenceRadius m1
-                                                           , coefficients = combineCoefficients (coefficients m1) (coefficients m2)
-                                                           }
-  where
-    combineCoefficients []       cs       = cs
-    combineCoefficients cs       []       = cs
-    combineCoefficients (c1:cs1) (c2:cs2) = addPairs c1 c2 : combineCoefficients cs1 cs2
-    addPairs (g1, h1) (g2, h2) = (g1 + g2, h1 + h2)
+combine :: SphericalHarmonicModel a -> SphericalHarmonicModel a -> SphericalHarmonicModel a
+combine m1 m2 = SphericalHarmonicModels [m1,m2]
 
 -- | Linearly scales a spherical harmonic model.
 scale :: (Num a) => a -> SphericalHarmonicModel a -> SphericalHarmonicModel a
-scale x m = m { coefficients = fmap scalePair (coefficients m) }
+scale x (SphericalHarmonicModel d r cs) = SphericalHarmonicModel d r $ fmap scalePair cs
   where
     scalePair (g, h) = (x * g, x * h)
+scale x (SphericalHarmonicModels ms) = SphericalHarmonicModels $ fmap (scale x) ms
 
 -- | Computes the scalar value of the spherical harmonic model at a specified spherical position.
 evaluateModel :: (Floating a, Ord a) => SphericalHarmonicModel a -- ^ Spherical harmonic model
@@ -55,12 +46,8 @@ evaluateModel :: (Floating a, Ord a) => SphericalHarmonicModel a -- ^ Spherical 
               -> a -- ^ Spherical colatitude (radian)
               -> a -- ^ Spherical longitude (radian)
               -> a -- ^ Model value
-evaluateModel model r colat lon = refR * sumOverDegree
+evaluateModel (SphericalHarmonicModel deg refR cs) r colat lon = refR * sumOverDegree
   where
-    refR = referenceRadius model
-    deg = modelDegree model
-    gs = map fst $ coefficients model
-    hs = map snd $ coefficients model
     sumOverDegree = sum $ fmap degreeTerm [0..deg]
     degreeTerm n = ((refR / r) ^ (n + 1)) * (sum $ fmap (orderTerm n) [0..n])
     orderTerm n m = lonFactor * (p (cos colat))
@@ -70,6 +57,9 @@ evaluateModel model r colat lon = refR * sumOverDegree
         p = schmidtSemiNormalizedAssociatedLegendreFunction n m
         g = gs !! computeIndex n m
         h = hs !! computeIndex n m
+        gs = map fst cs
+        hs = map snd cs
+evaluateModel (SphericalHarmonicModels ms) r colat lon = sum $ fmap (\m -> evaluateModel m r colat lon) ms
 
 -- | Computes the gradient of the scalar value of the spherical harmonic model, in spherical coordinates, at a specified location.
 evaluateModelGradient :: (Floating a, Ord a) => SphericalHarmonicModel a -- ^ Spherical harmonic model
